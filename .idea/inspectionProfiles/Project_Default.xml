@@ -1,0 +1,25 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <value>
+          <list size="11">
+            <item index="0" class="java.lang.String" itemvalue="pywin32" />
+            <item index="1" class="java.lang.String" itemvalue="absl-py" />
+            <item index="2" class="java.lang.String" itemvalue="tensorflow" />
+            <item index="3" class="java.lang.String" itemvalue="summarizer" />
+            <item index="4" class="java.lang.String" itemvalue="spacy" />
+            <item index="5" class="java.lang.String" itemvalue="spacy-legacy" />
+            <item index="6" class="java.lang.String" itemvalue="thinc" />
+            <item index="7" class="java.lang.String" itemvalue="blis" />
+            <item index="8" class="java.lang.String" itemvalue="srsly" />
+            <item index="9" class="java.lang.String" itemvalue="catalogue" />
+            <item index="10" class="java.lang.String" itemvalue="pdfplumber" />
+          </list>
+        </value>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyUnreachableCodeInspection" enabled="false" level="WARNING" enabled_by_default="false" />
+  </profile>
+</component>
