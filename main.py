@@ -16,10 +16,14 @@ load_dotenv()
 sender_email = os.getenv("EMAIL_ADDRESS")
 sender_password = os.getenv("EMAIL_PASSWORD")
 receiver_email = os.getenv("RECEIVE_EMAIL")
+print("Sending from: " + sender_email)
+print("Receiving at: " + receiver_email)
+
 search_string = "(RX 470) OR (R9 390)"
 subreddit = "hardwareswap"
+post_update_interval_minutes = 5
+
 job_loop = Timeloop()
-post_update_interval = timedelta(minutes=5)
 prev_posts = pandas.DataFrame()
 
 
@@ -35,7 +39,7 @@ def main():
     job_loop.start(block=True)
 
 
-@job_loop.job(interval=post_update_interval)
+@job_loop.job(interval=timedelta(minutes=post_update_interval_minutes))
 def update_search():
     global prev_posts
     print("Rerunning search...")
