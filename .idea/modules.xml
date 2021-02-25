@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/scrape-reddit.iml" filepath="$PROJECT_DIR$/.idea/scrape-reddit.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../gpu-scraper/.idea/gpu-scraper.iml" filepath="$PROJECT_DIR$/../gpu-scraper/.idea/gpu-scraper.iml" />
     </modules>
   </component>
 </project>
