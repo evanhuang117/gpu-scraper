@@ -1,7 +1,7 @@
 import os
 import smtplib
 import ssl
-from datetime import timedelta
+from datetime import timedelta, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -21,7 +21,7 @@ print("Sending from: " + sender_email)
 print("Receiving at: " + receiver_email)
 print("UserAgent: " + user_agent)
 
-search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070)"
+search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070) OR (RX 480) OR (RX 580)"
 subreddit = "hardwareswap"
 post_update_interval_minutes = 5
 
@@ -44,7 +44,8 @@ def main():
 @job_loop.job(interval=timedelta(minutes=post_update_interval_minutes))
 def update_search():
     global prev_posts
-    print("Rerunning search...")
+    dt_string = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+    print("[{}] Rerunning search...".format(dt_string))
     res = search_reddit(subreddit, search_string)
     updated_posts = parse_search(res)
     # take set difference to get the new posts
@@ -57,7 +58,7 @@ def update_search():
         # send the email
         try:
             send_email(email_message)
-            print("Email sent to: " + receiver_email + " from: " + sender_email)
+            print("Email sent to: {} from: {}".format(receiver_email, sender_email))
         except:
             print("Error sending email")
     else:
@@ -78,7 +79,7 @@ def search_reddit(subreddit, search_string):
     # query newest posts
     headers = {'User-Agent': user_agent}
     params = {'q': search_string, 'limit': '100', 'sort': 'new', 't': 'month', 'restrict_sr': 'true'}
-    res = requests.get("https://reddit.com/r/" + subreddit + "/search.json", params=params, headers=headers)
+    res = requests.get("https://reddit.com/r/{}/search.json".format(subreddit), params=params, headers=headers)
     return res
 
 
@@ -156,8 +157,8 @@ def create_email(posts):
 
     # go through all posts and insert a link for each one
     for i, post in posts.iterrows():
-        print("New post found: " + post['title'])
-        body += "<p><a href=\"" + post['url'] + "\">" + post['title'] + "</a><p>"
+        print("New post found: {}".format(post['title']))
+        body += "<p><a href=\"{}\"> {} </a><p>".format(post['url'], post['title'])
 
     body += "</body></html>"
     part = MIMEText(body, "html")
