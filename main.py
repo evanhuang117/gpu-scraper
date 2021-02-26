@@ -16,10 +16,12 @@ load_dotenv()
 sender_email = os.getenv("EMAIL_ADDRESS")
 sender_password = os.getenv("EMAIL_PASSWORD")
 receiver_email = os.getenv("RECEIVE_EMAIL")
+user_agent = os.getenv("USER_AGENT")
 print("Sending from: " + sender_email)
 print("Receiving at: " + receiver_email)
+print("UserAgent: " + user_agent)
 
-search_string = "(RX 470) OR (R9 390)"
+search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070)"
 subreddit = "hardwareswap"
 post_update_interval_minutes = 5
 
@@ -74,7 +76,7 @@ def update_search():
 
 def search_reddit(subreddit, search_string):
     # query newest posts
-    headers = {'User-Agent': 'EvansRedditGPUFinder/0.0.1'}
+    headers = {'User-Agent': user_agent}
     params = {'q': search_string, 'limit': '100', 'sort': 'new', 't': 'month', 'restrict_sr': 'true'}
     res = requests.get("https://reddit.com/r/" + subreddit + "/search.json", params=params, headers=headers)
     return res
@@ -127,7 +129,7 @@ def authenticate_reddit():
             'password': password}
 
     # setup our header info, which gives reddit a brief description of our app
-    headers = {'User-Agent': 'SearchReddit/0.0.1'}
+    headers = {'User-Agent': user_agent}
 
     # send our request for an OAuth token
     res = requests.post('https://www.reddit.com/api/v1/access_token',
