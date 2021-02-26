@@ -5,6 +5,7 @@ from datetime import timedelta, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from slack_sdk.webhook import WebhookClient
 import pandas
 import requests
 from dotenv import load_dotenv
@@ -17,17 +18,19 @@ sender_email = os.getenv("EMAIL_ADDRESS")
 sender_password = os.getenv("EMAIL_PASSWORD")
 receiver_email = os.getenv("RECEIVE_EMAIL")
 user_agent = os.getenv("USER_AGENT")
+slack_url = os.getenv("SLACK_WEB_HOOK_URL")
 print("Sending from: " + sender_email)
 print("Receiving at: " + receiver_email)
 print("UserAgent: " + user_agent)
 
-search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070) OR (RX 480) OR (RX 580)"
+search_string = "USA"
+#search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070) OR (RX 480) OR (RX 580) OR (1060) OR (1660)"
 subreddit = "hardwareswap"
-post_update_interval_minutes = 2
+post_update_interval_minutes = 0.5
+search_result_limit = 10
 
 job_loop = Timeloop()
 prev_posts = pandas.DataFrame()
-
 
 def main():
     # auth not needed for search
@@ -54,22 +57,26 @@ def update_search():
     new_posts = updated_posts.merge(prev_posts, how='left', indicator=True)
     # take only rows unique to updated_posts
     new_posts = new_posts[new_posts['_merge'] == 'left_only']
-    new_posts.drop(columns='_merge')
+    new_posts.drop(columns='_merge', inplace=True)
 
-    # send an email if there are new posts
+    # send a slack message/email if there are new posts
     if new_posts.size > 0:
+        print("{} new posts found".format(new_posts.size))
         email_message = create_email(new_posts)
-        # send the email
+        # send the notification
         try:
-            send_email(email_message)
-            print("Email sent to: {} from: {}".format(receiver_email, sender_email))
-        except:
-            print("Error sending email")
+            notify_slack(new_posts)
+            print("Slack message sent to: {}".format(slack_url))
+
+            #send_email(email_message)
+            #print("Email sent to: {} from: {}".format(receiver_email, sender_email))
+        except AssertionError as e:
+            print("Error sending notification\n" + e)
     else:
         print("No new posts found")
 
     # update the previous posts to include the new ones we just found
-    prev_posts = updated_posts
+    prev_posts = updated_posts.copy()
 
     """
     # refresh the auth token before it expires
@@ -83,7 +90,8 @@ def update_search():
 def search_reddit(subreddit, search_string):
     # query newest posts
     headers = {'User-Agent': user_agent}
-    params = {'q': search_string, 'limit': '100', 'sort': 'new', 't': 'week', 'restrict_sr': 'true'}
+    # small search result limit to reduce randomness of queries that return a large amount of results
+    params = {'q': search_string, 'limit': str(search_result_limit), 'sort': 'new', 't': 'week', 'restrict_sr': 'true'}
     res = requests.get("https://reddit.com/r/{}/search.json".format(subreddit), params=params, headers=headers)
     return res
 
@@ -107,6 +115,30 @@ def parse_search(search_response):
     # convert the list into a pandas dataframe - this is faster than appending dicts to a dataframe
     posts = pandas.DataFrame(posts)
     return posts
+
+
+def notify_slack(posts):
+    webhook = WebhookClient(slack_url)
+    blocks = []
+    # go through all posts and add a markdown section for each one
+    for i, post in posts.iterrows():
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "GPU Found\n*<{}|{}>*".format(post['url'], post['title'])
+                }
+            })
+
+    # send the slack message
+    response = webhook.send(
+        text="GPU Found",
+        blocks=blocks
+    )
+
+    assert response.status_code == 200, "200 not received from Slack"
+    assert response.body == "ok", "OK not received from Slack"
 
 
 def send_email(message):
