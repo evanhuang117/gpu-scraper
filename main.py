@@ -23,7 +23,7 @@ print("UserAgent: " + user_agent)
 
 search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070) OR (RX 480) OR (RX 580)"
 subreddit = "hardwareswap"
-post_update_interval_minutes = 5
+post_update_interval_minutes = 2
 
 job_loop = Timeloop()
 prev_posts = pandas.DataFrame()
@@ -48,13 +48,17 @@ def update_search():
     print("[{}] Rerunning search...".format(dt_string))
     res = search_reddit(subreddit, search_string)
     updated_posts = parse_search(res)
-    # take set difference to get the new posts
-    new_posts = pandas.concat([prev_posts, updated_posts]).drop_duplicates(keep=False)
 
-    # go through new posts and send an email with their links
+    # take set difference to get the new posts
+    # left join
+    new_posts = updated_posts.merge(prev_posts, how='left', indicator=True)
+    # take only rows unique to updated_posts
+    new_posts = new_posts[new_posts['_merge'] == 'left_only']
+    new_posts.drop(columns='_merge')
+
+    # send an email if there are new posts
     if new_posts.size > 0:
         email_message = create_email(new_posts)
-        print(email_message)
         # send the email
         try:
             send_email(email_message)
@@ -75,10 +79,11 @@ def update_search():
         headers = authenticate_reddit()
 """
 
+
 def search_reddit(subreddit, search_string):
     # query newest posts
     headers = {'User-Agent': user_agent}
-    params = {'q': search_string, 'limit': '100', 'sort': 'new', 't': 'month', 'restrict_sr': 'true'}
+    params = {'q': search_string, 'limit': '100', 'sort': 'new', 't': 'week', 'restrict_sr': 'true'}
     res = requests.get("https://reddit.com/r/{}/search.json".format(subreddit), params=params, headers=headers)
     return res
 
