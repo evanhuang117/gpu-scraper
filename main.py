@@ -10,6 +10,7 @@ import pandas
 import requests
 from dotenv import load_dotenv
 from timeloop import Timeloop
+from SlidingWindowMap import SlidingWindowMap
 
 # load secrets from .env file
 load_dotenv()
@@ -23,14 +24,13 @@ print("Sending from: " + sender_email)
 print("Receiving at: " + receiver_email)
 print("UserAgent: " + user_agent)
 
-search_string = "USA"
-#search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070) OR (RX 480) OR (RX 580) OR (1060) OR (1660)"
+search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070) OR (RX 480) OR (RX 580) OR (1060) OR (1660)"
 subreddit = "hardwareswap"
-post_update_interval_minutes = 0.5
+post_update_interval_minutes = 2
 search_result_limit = 10
 
 job_loop = Timeloop()
-prev_posts = pandas.DataFrame()
+most_recent_posts = SlidingWindowMap(search_result_limit)
 
 def main():
     # auth not needed for search
@@ -46,23 +46,31 @@ def main():
 
 @job_loop.job(interval=timedelta(minutes=post_update_interval_minutes))
 def update_search():
-    global prev_posts
     dt_string = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
     print("[{}] Rerunning search...".format(dt_string))
     res = search_reddit(subreddit, search_string)
     updated_posts = parse_search(res)
 
+    new_posts = []
+    for i, post in updated_posts.iterrows():
+        # if the key was successfully added we know it "pushed" another one out of its spot
+        # therefore its a new post
+        if most_recent_posts.put(post['title'], post):
+            new_posts.append(post)
+
+    """
     # take set difference to get the new posts
     # left join
     new_posts = updated_posts.merge(prev_posts, how='left', indicator=True)
     # take only rows unique to updated_posts
     new_posts = new_posts[new_posts['_merge'] == 'left_only']
     new_posts.drop(columns='_merge', inplace=True)
+    """
 
     # send a slack message/email if there are new posts
-    if new_posts.size > 0:
-        print("{} new posts found".format(new_posts.size))
-        email_message = create_email(new_posts)
+    if len(new_posts) > 0:
+        print("{} new posts found".format(len(new_posts)))
+        # email_message = create_email(new_posts)
         # send the notification
         try:
             notify_slack(new_posts)
@@ -121,7 +129,7 @@ def notify_slack(posts):
     webhook = WebhookClient(slack_url)
     blocks = []
     # go through all posts and add a markdown section for each one
-    for i, post in posts.iterrows():
+    for post in posts:
         blocks.append(
             {
                 "type": "section",
@@ -193,7 +201,7 @@ def create_email(posts):
     body = "<html><body>"
 
     # go through all posts and insert a link for each one
-    for i, post in posts.iterrows():
+    for post in posts:
         print("New post found: {}".format(post['title']))
         body += "<p><a href=\"{}\"> {} </a><p>".format(post['url'], post['title'])
 
