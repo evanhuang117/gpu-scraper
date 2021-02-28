@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="ca808e2a-2075-412b-a081-f0893f8cc9ec" name="evan@bigfatserver.ddns.net:43110 key (1)">
+        <fileTransfer rootFolder="/home/evan" accessType="SFTP" host="bigfatserver.ddns.net" port="43110" sshConfigId="21f2fc17-ed6a-45cf-8f35-65a33e4368cf" sshConfig="evan@bigfatserver.ddns.net:43110 key" keyPair="true" />
+      </webServer>
+    </option>
+  </component>
+</project>

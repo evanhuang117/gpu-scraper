@@ -8,6 +8,9 @@ tasks.xml
 .idea/**/usage.statistics.xml
 .idea/**/dictionaries
 .idea/**/shelf
+deployment.xml
+webServers.xml
+gpu-scraper.iml
 
 # Generated files
 .idea/**/contentModel.xml

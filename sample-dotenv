@@ -1,12 +1,18 @@
 #create a file named ".env" in project root with the following in it
+
+# for email notifications
 EMAIL_ADDRESS="email you want to send from"
 EMAIL_PASSWORD="password for ^"
 RECEIVE_EMAIL="email you want to receive at"
 
+# needed for automatic reddit message functionality
 REDDIT_CLIENT_ID=
 REDDIT_CLIENT_SECRET=
-
 REDDIT_USERNAME=
 REDDIT_PASSWORD=
 
+# name to use when querying reddit search
 USER_AGENT=SampleUserAgent/1.0
+
+# needed for slack notifications
+SLACK_WEB_HOOK_URL=

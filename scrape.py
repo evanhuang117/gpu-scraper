@@ -4,9 +4,8 @@ import ssl
 from datetime import timedelta, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
+import regex as re
 from slack_sdk.webhook import WebhookClient
-import pandas
 import requests
 from dotenv import load_dotenv
 from timeloop import Timeloop
@@ -24,67 +23,89 @@ print("Sending from: " + sender_email)
 print("Receiving at: " + receiver_email)
 print("UserAgent: " + user_agent)
 
-search_string = "(RX 470) OR (R9 390) OR (RX 570) OR (RTX 3070) OR (RX 480) OR (RX 580) OR (1060) OR (1660)"
+# used for notifications (manual handling)
+coarse_regex = [
+    r"(?<!\$)(1[0-5][0-9]{2})(?!p|0)(?:[\s-]*?(watt|w)|[\s\S]*?(power supply|psu)+)",  # match posts with 1000w+ psus
+    r"(?<!\$)(1(?:0[67]|66)0)(?=[\s\S]*?(?:gpu|graphic))",  # match posts with nvidia series followed by "gpu"/"graphic"
+    r"(RX\s?[45][78]0)|(?<!\$)([45][78]0)(?!\d+|[\s-]*(usd|dollar))(?=[\s\S]*?(?:gpu|graphic))"
+    # match posts with amd series that arent prices and gpus
+]
+# used for automated replies to posts
+fine_regex = [
+    r"(?(?<=gtx)\s*(1(?:0[67]|66)0)|(1(?:0[67]|66)0)(?:[\s-]*)(6gb?))",  # match permutations of gtx 1060 6gb
+    r"(?<=\[H\]).*(1(?:0[67]|66)0)(?=.*\[W\])",  # match nvidia series in title with "have"
+    r"(RX\s?[45][78]0)(?:[\s-]*)(8gb?)",  # match permutations of rx470 8gb
+    r"(?<=\[H\]).*([45][78]0)(?=.*\[W\])"
+]
+search_string = "USA"
+# search_string = "PSU OR (RX 470) OR (R9 390) OR (RX 570) OR (RX 480) OR (RX 580) OR (1060) OR (1660)"
 subreddit = "hardwareswap"
-post_update_interval_minutes = 2
-search_result_limit = 10
+post_update_interval_seconds = 5
+search_result_limit = 30
 
 job_loop = Timeloop()
 most_recent_posts = SlidingWindowMap(search_result_limit)
 
+
 def main():
     # auth not needed for search
     # headers = authenticate_reddit()
-    global prev_posts
-    res = search_reddit(subreddit, search_string)
-    matching_posts = parse_search(res)
-    # store results in a global var so the scheduled job can reference them
-    prev_posts = matching_posts
+
+    # compile regexp for search
+    global coarse_regex
+    global fine_regex
+    coarse_regex = compile_re(coarse_regex)
+    fine_regex = compile_re(fine_regex)
+
     # start the job loop to continuously check for new posts
     job_loop.start(block=True)
 
 
-@job_loop.job(interval=timedelta(minutes=post_update_interval_minutes))
+@job_loop.job(interval=timedelta(seconds=post_update_interval_seconds))
 def update_search():
-    dt_string = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
-    print("[{}] Rerunning search...".format(dt_string))
-    res = search_reddit(subreddit, search_string)
-    updated_posts = parse_search(res)
+    curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+    print("[{}] Rerunning search...".format(curr_time))
+    try:
+        res = search_reddit(subreddit, search_string)
+        updated_posts = parse_search(res)
+    except AssertionError as e:
+        print("Error searching reddit: {}".format(e))
 
-    new_posts = []
-    for i, post in updated_posts.iterrows():
+    # only save keys for the post and use the most_recent map to get the actual post
+    # to save time/space
+    new_post_keys = set()
+    for post in updated_posts:
         # if the key was successfully added we know it "pushed" another one out of its spot
         # therefore its a new post
-        if most_recent_posts.put(post['title'], post):
-            new_posts.append(post)
+        title = post['title']
+        if most_recent_posts.put(title, post):
+            new_post_keys.add(title)
 
-    """
-    # take set difference to get the new posts
-    # left join
-    new_posts = updated_posts.merge(prev_posts, how='left', indicator=True)
-    # take only rows unique to updated_posts
-    new_posts = new_posts[new_posts['_merge'] == 'left_only']
-    new_posts.drop(columns='_merge', inplace=True)
-    """
-
-    # send a slack message/email if there are new posts
-    if len(new_posts) > 0:
-        print("{} new posts found".format(len(new_posts)))
-        # email_message = create_email(new_posts)
-        # send the notification
-        try:
-            notify_slack(new_posts)
-            print("Slack message sent to: {}".format(slack_url))
-
-            #send_email(email_message)
-            #print("Email sent to: {} from: {}".format(receiver_email, sender_email))
-        except AssertionError as e:
-            print("Error sending notification\n" + e)
+    # filter out the posts we want using regex
+    coarse_keys = regex_filter(new_post_keys, coarse_regex)
+    get_title = lambda posts: "{} new posts found".format(len(posts))
+    if coarse_keys:
+        notify(coarse_keys, "COARSE - {}".format(get_title(coarse_keys)))
+        fine_keys = regex_filter(coarse_keys, fine_regex)
+        if fine_keys:
+            notify(fine_keys, "FINE - {}".format(get_title(fine_keys)))
     else:
         print("No new posts found")
 
-    # update the previous posts to include the new ones we just found
-    prev_posts = updated_posts.copy()
+
+def notify(post_keys, title):
+    # send a slack message/email if there are new posts
+    print("{} new posts found".format(len(post_keys)))
+    # email_message = create_email(new_posts)
+    # send the notification
+    try:
+        notify_slack(post_keys, title)
+        print("Slack message sent to: {}".format(slack_url))
+
+        # send_email(email_message)
+        # print("Email sent to: {} from: {}".format(receiver_email, sender_email))
+    except AssertionError as e:
+        print("Error sending notification: {}".format(e))
 
     """
     # refresh the auth token before it expires
@@ -95,12 +116,40 @@ def update_search():
 """
 
 
+def notify_slack(post_keys, title):
+    webhook = WebhookClient(slack_url)
+    curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+    # make a list of the new posts in markdown
+    text = "[{}] {}\n".format(curr_time, title) \
+           + "\n".join(["*<{}|{}>*"
+                       .format(most_recent_posts.get(k)['url'],
+                               most_recent_posts.get(k)['title'])
+                        for k in post_keys])
+    blocks = [{
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": text
+        }
+    }]
+
+    # send the slack message
+    response = webhook.send(
+        text=title,
+        blocks=blocks
+    )
+
+    assert response.status_code == 200, "{} received from Slack".format(response.status_code)
+    assert response.body == "ok", "{} received from Slack".format(response.body)
+
+
 def search_reddit(subreddit, search_string):
     # query newest posts
     headers = {'User-Agent': user_agent}
     # small search result limit to reduce randomness of queries that return a large amount of results
     params = {'q': search_string, 'limit': str(search_result_limit), 'sort': 'new', 't': 'week', 'restrict_sr': 'true'}
     res = requests.get("https://reddit.com/r/{}/search.json".format(subreddit), params=params, headers=headers)
+    assert res.status_code == 200, "{} received from reddit".format(res.status_code)
     return res
 
 
@@ -120,33 +169,17 @@ def parse_search(search_response):
 
     # filter to only posts that are selling
     posts = filter(lambda data: data['flair'] == 'SELLING', posts)
-    # convert the list into a pandas dataframe - this is faster than appending dicts to a dataframe
-    posts = pandas.DataFrame(posts)
     return posts
 
 
-def notify_slack(posts):
-    webhook = WebhookClient(slack_url)
-    blocks = []
-    # go through all posts and add a markdown section for each one
-    for post in posts:
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "GPU Found\n*<{}|{}>*".format(post['url'], post['title'])
-                }
-            })
-
-    # send the slack message
-    response = webhook.send(
-        text="GPU Found",
-        blocks=blocks
-    )
-
-    assert response.status_code == 200, "200 not received from Slack"
-    assert response.body == "ok", "OK not received from Slack"
+def regex_filter(post_keys, reg_exp):
+    matching_posts_keys = set()
+    for key in post_keys:
+        post = most_recent_posts.get(key)
+        matches = re.findall(reg_exp, post['title'] + post['body'])
+        if len(matches) > 0:
+            matching_posts_keys.add(key)
+    return matching_posts_keys
 
 
 def send_email(message):
@@ -193,7 +226,7 @@ def authenticate_reddit():
     return headers
 
 
-def create_email(posts):
+def create_email(post_keys):
     message = MIMEMultipart()
     message["Subject"] = "GPU Found"
     message["From"] = sender_email
@@ -201,7 +234,8 @@ def create_email(posts):
     body = "<html><body>"
 
     # go through all posts and insert a link for each one
-    for post in posts:
+    for key in post_keys:
+        post = most_recent_posts.get(key)
         print("New post found: {}".format(post['title']))
         body += "<p><a href=\"{}\"> {} </a><p>".format(post['url'], post['title'])
 
@@ -211,7 +245,9 @@ def create_email(posts):
     return message.as_string()
 
 
+def compile_re(re_list):
+    return re.compile('|'.join(re_list), flags=re.IGNORECASE)
+
+
 if __name__ == '__main__':
     main()
-
-

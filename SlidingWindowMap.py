@@ -2,6 +2,7 @@ from queue import Queue
 
 
 # keeps track of the newest self.length key, value pairs
+# backed by hashmap so elements in the queue are guaranteed to be unique
 # wrote this to keep track of the newest X number of reddit posts returned by a search
 
 class SlidingWindowMap(object):
@@ -10,6 +11,12 @@ class SlidingWindowMap(object):
         self.map = {}
         self.q = Queue()
         self.length = length
+
+    def __iter__(self):
+        return self.map.__iter__()
+
+    def __next__(self):
+        return self.map
 
     def put(self, key, value):
         if key not in self.map:
