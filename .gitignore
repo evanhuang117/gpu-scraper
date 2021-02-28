@@ -10,7 +10,6 @@ tasks.xml
 .idea/**/shelf
 deployment.xml
 webServers.xml
-gpu-scraper.iml
 
 # Generated files
 .idea/**/contentModel.xml
