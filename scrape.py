@@ -25,17 +25,18 @@ print("UserAgent: " + user_agent)
 
 # used for notifications (manual handling)
 coarse_regex = [
-    r"(?<!\$)(1[0-5][0-9]{2})(?!p|0)(?:[\s-]*?(watt|w)|[\s\S]*?(power supply|psu)+)",  # match posts with 1000w+ psus
-    r"(?<!\$)(1(?:0[67]|66)0)(?=[\s\S]*?(?:gpu|graphic))",  # match posts with nvidia series followed by "gpu"/"graphic"
+ #   r"(?<!\$)(1[0-5][0-9]{2})(?!p|0)(?:[\s-]*?(watt|w)|[\s\S]*?(power supply|psu)+)",  # match posts with 1000w+ psus
+    r"(?<!\$)(1(?:0[678]|66)0)(?=[\s\S]*?(?:gpu|graphic))",  # match posts with nvidia series followed by "gpu"/"graphic"
+    r"GTX\s*(1(?:0[678]|66)0)",
     r"(RX\s?[45][78]0)|(?<!\$)([45][78]0)(?!\d+|[\s-]*(usd|dollar))(?=[\s\S]*?(?:gpu|graphic))"
     # match posts with amd series that arent prices and gpus
 ]
 # used for automated replies to posts
 fine_regex = [
-    r"(?(?<=gtx)\s*(1(?:0[67]|66)0)|(1(?:0[67]|66)0)(?:[\s-]*)(6gb?))",  # match permutations of gtx 1060 6gb
-    r"(?<=\[H\]).*(1(?:0[67]|66)0)(?=.*\[W\])",  # match nvidia series in title with "have"
+    r"(1(?:0[78]|66)0(?!\s?p)|(?:1(?:0[67]|66)0)(?:[\s-]*)(6gb?))",  # match permutations of gtx 1060 6gb
+   # r"(?<=\[H\]).*(1(?:0[67]|66)0)(?=.*\[W\])",  # match nvidia series in title with "have"
     r"(RX\s?[45][78]0)(?:[\s-]*)(8gb?)",  # match permutations of rx470 8gb
-    r"(?<=\[H\]).*([45][78]0)(?=.*\[W\])"
+   # r"(?<=\[H\]).*([45][78]0)(?=.*\[W\])"
 ]
 search_string = "USA"
 # search_string = "PSU OR (RX 470) OR (R9 390) OR (RX 570) OR (RX 480) OR (RX 580) OR (1060) OR (1660)"
@@ -44,7 +45,8 @@ post_update_interval_seconds = 5
 search_result_limit = 30
 
 job_loop = Timeloop()
-most_recent_posts = SlidingWindowMap(search_result_limit)
+# take care of (possible) edge case when result is at front of queue
+most_recent_posts = SlidingWindowMap(2 * search_result_limit)
 
 
 def main():
@@ -57,12 +59,28 @@ def main():
     coarse_regex = compile_re(coarse_regex)
     fine_regex = compile_re(fine_regex)
 
+    # pre populate new posts queuemap
+    find_newest()
     # start the job loop to continuously check for new posts
     job_loop.start(block=True)
 
 
 @job_loop.job(interval=timedelta(seconds=post_update_interval_seconds))
 def update_search():
+    new_post_keys = find_newest()
+    # filter out the posts we want using regex
+    coarse_keys = regex_filter(new_post_keys, coarse_regex)
+    fine_keys = regex_filter(coarse_keys, fine_regex)
+    coarse_keys = coarse_keys - fine_keys
+    get_title = lambda posts: "{} new match{} found".format(len(posts), "es" if len(posts) > 1 else "")
+    if coarse_keys or fine_keys:
+        notify(coarse_keys, "COARSE - {}".format(get_title(coarse_keys)))
+        notify(fine_keys, "FINE - {}".format(get_title(fine_keys)))
+    else:
+        print("No new matches found")
+
+
+def find_newest():
     curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
     print("[{}] Rerunning search...".format(curr_time))
     try:
@@ -73,39 +91,32 @@ def update_search():
 
     # only save keys for the post and use the most_recent map to get the actual post
     # to save time/space
-    new_post_keys = set()
+    new_keys = set()
     for post in updated_posts:
         # if the key was successfully added we know it "pushed" another one out of its spot
         # therefore its a new post
         title = post['title']
         if most_recent_posts.put(title, post):
-            new_post_keys.add(title)
+            new_keys.add(title)
 
-    # filter out the posts we want using regex
-    coarse_keys = regex_filter(new_post_keys, coarse_regex)
-    get_title = lambda posts: "{} new posts found".format(len(posts))
-    if coarse_keys:
-        notify(coarse_keys, "COARSE - {}".format(get_title(coarse_keys)))
-        fine_keys = regex_filter(coarse_keys, fine_regex)
-        if fine_keys:
-            notify(fine_keys, "FINE - {}".format(get_title(fine_keys)))
-    else:
-        print("No new posts found")
+    print("{} new post{} found".format(len(new_keys), "s" if len(new_keys) != 1 else ""))
+    return new_keys
 
 
 def notify(post_keys, title):
-    # send a slack message/email if there are new posts
-    print("{} new posts found".format(len(post_keys)))
-    # email_message = create_email(new_posts)
-    # send the notification
-    try:
-        notify_slack(post_keys, title)
-        print("Slack message sent to: {}".format(slack_url))
+    if post_keys:
+        # send a slack message/email if there are new posts
+        print("{} new matches found".format(len(post_keys)))
+        # email_message = create_email(new_posts)
+        # send the notification
+        try:
+            notify_slack(post_keys, title)
+            print("Slack message sent to: {}".format(slack_url))
 
-        # send_email(email_message)
-        # print("Email sent to: {} from: {}".format(receiver_email, sender_email))
-    except AssertionError as e:
-        print("Error sending notification: {}".format(e))
+            # send_email(email_message)
+            # print("Email sent to: {} from: {}".format(receiver_email, sender_email))
+        except AssertionError as e:
+            print("Error sending notification: {}".format(e))
 
     """
     # refresh the auth token before it expires
@@ -121,7 +132,7 @@ def notify_slack(post_keys, title):
     curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
     # make a list of the new posts in markdown
     text = "[{}] {}\n".format(curr_time, title) \
-           + "\n".join(["*<{}|{}>*"
+           + "\n\n".join(["*<{}|{}>*"
                        .format(most_recent_posts.get(k)['url'],
                                most_recent_posts.get(k)['title'])
                         for k in post_keys])
