@@ -10,4 +10,4 @@ This way I get more accurate search results and can use the regex matches to aut
 - Search Reddit as fast as 60 times per minute (rate limit)
 - Notify by email
 - Notify by Slack message (instant)
-- Automatically message users based on a fine regex filter
+- Automatically message users based on a fine regex filter WIP (subject to rate limit) 
