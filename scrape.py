@@ -47,7 +47,7 @@ fine_regex = [
     r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(R9[\s-]*390)(?=.*\[W\])"
 ]
 title_regex = [
-    r"\[W\].*(pay[\s-]*pal|\bPP\b)"  # filter out only posts that want paypal (selling)
+    r"\[H\].*?\[W\].*(pay[\s-]*pal|\bPP\b)"  # filter out only posts that want paypal (selling)
 ]
 search_string = "USA"
 subreddit = "hardwareswap"
@@ -88,8 +88,8 @@ def update_search():
     if coarse_keys or fine_keys:
         notify(coarse_keys, "COARSE - {}".format(get_title(coarse_keys)))
         notify(fine_keys, "FINE - {}".format(get_title(fine_keys)))
-    else:
-        print("No new matches found")
+    print("\t\t{}/{} coarse matches".format(len(coarse_keys), len(new_post_keys)))
+    print("\t\t{}/{} fine matches".format(len(fine_keys), len(new_post_keys)))
 
 
 def find_newest():
@@ -108,7 +108,7 @@ def find_newest():
             title = post['title']
             if most_recent_posts.put(title, post):
                 new_keys.add(title)
-        print("{}/{} are new posts".format(len(new_keys), len(updated_posts)))
+        print("\t\t{}/{} are new posts".format(len(new_keys), len(updated_posts)))
 
     except: # catch all exceptions because we never want this to fail
         e = sys.exec_info()[0]
@@ -119,12 +119,11 @@ def find_newest():
 def notify(post_keys, title):
     if post_keys:
         # send a slack message/email if there are new posts
-        print("{} new matches found".format(len(post_keys)))
         # email_message = create_email(new_posts)
         # send the notification
         try:
             notify_slack(post_keys, title)
-            print("Slack message sent to: {}".format(slack_url))
+            print("\tSlack message sent to: {}".format(slack_url))
 
             # send_email(email_message)
             # print("Email sent to: {} from: {}".format(receiver_email, sender_email))
@@ -198,7 +197,7 @@ def parse_search(search_response):
     # this also helps to filter out posts that are local only
     # posts = filter(lambda data: data['flair'] == 'SELLING', posts)
     title_filtered = [p for p in posts if re.findall(title_regex, p['title'])]
-    print("{}/{} posts matching title filters".format(len(title_filtered), len(posts)))
+    print("\t{}/{} posts matching title filters".format(len(title_filtered), len(posts)))
     return title_filtered
 
 
