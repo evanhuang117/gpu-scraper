@@ -1,6 +1,7 @@
 import os
 import smtplib
 import ssl
+import sys
 from datetime import timedelta, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -25,21 +26,30 @@ print("UserAgent: " + user_agent)
 
 # used for notifications (manual handling)
 coarse_regex = [
- #   r"(?<!\$)(1[0-5][0-9]{2})(?!p|0)(?:[\s-]*?(watt|w)|[\s\S]*?(power supply|psu)+)",  # match posts with 1000w+ psus
-    r"(?<!\$)(1(?:0[678]|66)0)(?=[\s\S]*?(?:gpu|graphic))",  # match posts with nvidia series followed by "gpu"/"graphic"
+    #   r"(?<!\$)(1[0-5][0-9]{2})(?!p|0)(?:[\s-]*?(watt|w)|[\s\S]*?(power supply|psu)+)",  # match posts with 1000w+ psus
+    r"(?<!\$)(1(?:0[678]|66)0)(?=[\s\S]*?(?:gpu|graphic))",
+    # match posts with nvidia series followed by "gpu"/"graphic"
     r"GTX\s*(1(?:0[678]|66)0)",
-    r"(RX\s?[45][78]0)|(?<!\$)([45][78]0)(?!\d+|[\s-]*(usd|dollar))(?=[\s\S]*?(?:gpu|graphic))"
     # match posts with amd series that arent prices and gpus
+    r"(RX\s?[45][78]0)|(?<!\$)([45][78]0)(?!\d+|[\s-]*(usd|dollar))(?=[\s\S]*?(?:gpu|graphic))",
+    # posts about r9 390 gpus
+    r"R9[\s-]*390(?=[\s\S]*?(?:gpu|graphic))"
 ]
 # used for automated replies to posts
 fine_regex = [
-    r"(1(?:0[78]|66)0(?!\s?p)|(?:1(?:0[67]|66)0)(?:[\s-]*)(6gb?))",  # match permutations of gtx 1060 6gb
-   # r"(?<=\[H\]).*(1(?:0[67]|66)0)(?=.*\[W\])",  # match nvidia series in title with "have"
-    r"(RX\s?[45][78]0)(?:[\s-]*)(8gb?)",  # match permutations of rx470 8gb
-   # r"(?<=\[H\]).*([45][78]0)(?=.*\[W\])"
+    # match permutations of 1060 6gb in the title only
+    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(1(?:0[78]|66)0)(?!\s?p)|(1060)[\s-]*(6gb?)(?=.*\[W\])",
+    # r"(?<=\[H\]).*(1(?:0[67]|66)0)(?=.*\[W\])",  # match nvidia series in title with "have"
+    # match permutations of 8gb AMD cards we want in the title only
+    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(RX\s?[45][78]0)(?:[\s-]*)(8gb?)(?=.*\[W\])",
+    # r"(?<=\[H\]).*([45][78]0)(?=.*\[W\])"
+    # match r9 390s in the title
+    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(R9[\s-]*390)(?=.*\[W\])"
+]
+title_regex = [
+    r"\[W\].*(pay[\s-]*pal|\bPP\b)"  # filter out only posts that want paypal (selling)
 ]
 search_string = "USA"
-# search_string = "PSU OR (RX 470) OR (R9 390) OR (RX 570) OR (RX 480) OR (RX 580) OR (1060) OR (1660)"
 subreddit = "hardwareswap"
 post_update_interval_seconds = 5
 search_result_limit = 30
@@ -56,10 +66,12 @@ def main():
     # compile regexp for search
     global coarse_regex
     global fine_regex
+    global title_regex
     coarse_regex = compile_re(coarse_regex)
     fine_regex = compile_re(fine_regex)
+    title_regex = compile_re(title_regex)
 
-    # pre populate new posts queuemap
+    # pre populate new posts queuemap to notify only for stuff posted after the program is started
     find_newest()
     # start the job loop to continuously check for new posts
     job_loop.start(block=True)
@@ -83,23 +95,24 @@ def update_search():
 def find_newest():
     curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
     print("[{}] Rerunning search...".format(curr_time))
+    new_keys = set()
+
     try:
         res = search_reddit(subreddit, search_string)
         updated_posts = parse_search(res)
-    except AssertionError as e:
+        # only save keys for the post and use the most_recent map to get the actual post
+        # to save time/space
+        for post in updated_posts:
+            # if the key was successfully added we know it "pushed" another one out of its spot
+            # therefore its a new post
+            title = post['title']
+            if most_recent_posts.put(title, post):
+                new_keys.add(title)
+        print("{}/{} are new posts".format(len(new_keys), len(updated_posts)))
+
+    except: # catch all exceptions because we never want this to fail
+        e = sys.exec_info()[0]
         print("Error searching reddit: {}".format(e))
-
-    # only save keys for the post and use the most_recent map to get the actual post
-    # to save time/space
-    new_keys = set()
-    for post in updated_posts:
-        # if the key was successfully added we know it "pushed" another one out of its spot
-        # therefore its a new post
-        title = post['title']
-        if most_recent_posts.put(title, post):
-            new_keys.add(title)
-
-    print("{} new post{} found".format(len(new_keys), "s" if len(new_keys) != 1 else ""))
     return new_keys
 
 
@@ -133,9 +146,9 @@ def notify_slack(post_keys, title):
     # make a list of the new posts in markdown
     text = "[{}] {}\n".format(curr_time, title) \
            + "\n\n".join(["*<{}|{}>*"
-                       .format(most_recent_posts.get(k)['url'],
-                               most_recent_posts.get(k)['title'])
-                        for k in post_keys])
+                         .format(most_recent_posts.get(k)['url'],
+                                 most_recent_posts.get(k)['title'])
+                          for k in post_keys])
     blocks = [{
         "type": "section",
         "text": {
@@ -179,8 +192,14 @@ def parse_search(search_response):
         posts.append(data)
 
     # filter to only posts that are selling
-    posts = filter(lambda data: data['flair'] == 'SELLING', posts)
-    return posts
+    # filtering by flair can be slow because people forget to flair, then the post isn't marked selling until
+    # the bot tags it, and by that point the stuff has already been sold
+    # use regex to filter out posts that "seem" to be selling, i.e. accepting paypal in the title
+    # this also helps to filter out posts that are local only
+    # posts = filter(lambda data: data['flair'] == 'SELLING', posts)
+    title_filtered = [p for p in posts if re.findall(title_regex, p['title'])]
+    print("{}/{} posts matching title filters".format(len(title_filtered), len(posts)))
+    return title_filtered
 
 
 def regex_filter(post_keys, reg_exp):
@@ -188,7 +207,7 @@ def regex_filter(post_keys, reg_exp):
     for key in post_keys:
         post = most_recent_posts.get(key)
         matches = re.findall(reg_exp, post['title'] + post['body'])
-        if len(matches) > 0:
+        if matches:
             matching_posts_keys.add(key)
     return matching_posts_keys
 

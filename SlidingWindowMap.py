@@ -12,12 +12,6 @@ class SlidingWindowMap(object):
         self.q = Queue()
         self.length = length
 
-    def __iter__(self):
-        return self.map.__iter__()
-
-    def __next__(self):
-        return self.map
-
     def put(self, key, value):
         if key not in self.map:
             # remove the first element if the queue reaches max size
