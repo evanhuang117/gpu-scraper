@@ -111,7 +111,7 @@ def find_newest():
         print("\t\t{}/{} are new posts".format(len(new_keys), len(updated_posts)))
 
     except: # catch all exceptions because we never want this to fail
-        e = sys.exec_info()[0]
+        e = sys.exc_info()[0]
         print("Error searching reddit: {}".format(e))
     return new_keys
 
