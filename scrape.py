@@ -49,7 +49,7 @@ fine_regex = [
     r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(R9[\s-]*390)(?=.*\[W\])"
 ]
 title_regex = [
-    r"\[USA.*?\].*\[H\].*?\[W\].*(pay[\s-]*pal|\bPP\b)"  # filter out only posts that want paypal (selling)
+    r"\[USA.*?\].*\[H\].*?\[W\].*(pay[\s-]*pal|\bPP)"  # filter out only posts that want paypal (selling)
 ]
 search_string = ""
 subreddit = "hardwareswap"

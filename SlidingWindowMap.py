@@ -19,6 +19,7 @@ class SlidingWindowMap(object):
             # remove the oldest element if the queue reaches max size
             if self.q.qsize() == self.length:
                 del self.map[self.q.get()]
+            # put the new post in
             self.q.put(key)
             self.map[key] = value
             return True

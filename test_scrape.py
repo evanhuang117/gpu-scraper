@@ -6,24 +6,24 @@ from SlidingWindowMap import SlidingWindowMap
 @pytest.fixture
 def mock_post_titles():
     return {
-        "[USA-WI] [H] bullshit and more crap [W] moolah",
-        "[USA-WI] [H] 1060[W] moolah",
-        "[USA-WI] [H] 1060 and crap[W] moolah",
+        "[USA-WI] [H] bullshit and more crap [W] paypal",
+        "[USA-WI] [H] 1060[W] PP",
+        "[USA-WI] [W] 1060[H] PP",
         "[USA-WI] [H] crap and a maybe a gpu[W] moolah",
-        "[USA-WI] [H] 1060[W] moolah and a 1060",
-        "[USA-WI] [H] literally nothing [W] moolah "
+        "[USA-WI] [H] literally nothing [W] moolah ",
+        "[USA - WI][H] GTX 1060 6gb[W] Paypal"
     }
 
 
 @pytest.fixture
 def mock_post_body():
     return {
-        "I have a 1060 but its not a gpu and $1060 dollars",
+        "I have $1060 dollars",
         "I have a GTX1060 6gb",
-        "I have a 1060 6gb",
+        "should not match anything because of title",
         "I have a gtx 1060-6gb",
-        "I might have a gtx1060",
-        "this shouldn't match anything"
+        "this shouldn't match anything",
+        "test fine regex"
     }
 
 num_posts = 6
@@ -42,17 +42,25 @@ def mock_most_recent_posts(mock_post_titles, mock_post_body):
     return most_recent
 
 
-def test_regex_filter_coarse(mock_post_titles, mock_most_recent_posts):
-    compiled = scrape.compile_re(scrape.coarse_regex)
+def test_regex_filter_title(mock_post_titles, mock_most_recent_posts):
+    compiled = scrape.compile_re(scrape.title_regex)
     scrape.most_recent_posts = mock_most_recent_posts
     posts_matched = scrape.regex_filter(mock_post_titles, compiled)
+    expected = {
+        "[USA-WI] [H] bullshit and more crap [W] paypal",
+        "[USA-WI] [H] 1060[W] PP",
+        "[USA - WI][H] GTX 1060 6gb[W] Paypal"
+    }
 
-    assert len(posts_matched) == 5
+    assert posts_matched == expected
 
 
 def test_regex_filter_fine(mock_post_titles, mock_most_recent_posts):
-    compiled = scrape.compile_re(scrape.coarse_regex)
+    compiled = scrape.compile_re(scrape.fine_regex)
     scrape.most_recent_posts = mock_most_recent_posts
     posts_matched = scrape.regex_filter(mock_post_titles, compiled)
+    expected = {
+        "[USA - WI][H] GTX 1060 6gb[W] Paypal"
+    }
 
-    assert len(posts_matched) == 5
+    assert posts_matched == expected
