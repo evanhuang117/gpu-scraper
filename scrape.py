@@ -49,9 +49,9 @@ fine_regex = [
     r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(R9[\s-]*390)(?=.*\[W\])"
 ]
 title_regex = [
-    r"\[H\].*?\[W\].*(pay[\s-]*pal|\bPP\b)"  # filter out only posts that want paypal (selling)
+    r"\[USA.*?\].*\[H\].*?\[W\].*(pay[\s-]*pal|\bPP\b)"  # filter out only posts that want paypal (selling)
 ]
-search_string = "USA"
+search_string = ""
 subreddit = "hardwareswap"
 post_update_interval_seconds = 5
 search_result_limit = 30
@@ -101,7 +101,7 @@ def find_newest():
     new_keys = set()
 
     try:
-        res = search_reddit(subreddit, search_string)
+        res = search_reddit(subreddit, search_string) if search_string else retrieve_all(subreddit)
         updated_posts = parse_search(res)
         # only save keys for the post and use the most_recent map to get the actual post
         # to save time/space
@@ -113,7 +113,7 @@ def find_newest():
                 new_keys.add(title)
         print("\t\t{}/{} are new posts".format(len(new_keys), len(updated_posts)))
 
-    except AssertionError: # catch all exceptions because we want to keep running even if theres a failure
+    except AssertionError:  # catch all exceptions because we want to keep running even if theres a failure
         e = sys.exc_info()[0]
         print("Error searching reddit: {}".format(e))
     return new_keys
@@ -154,7 +154,7 @@ def notify_slack(post_keys, title):
             post_data['url'],
             post_data['title'],
             round(delta.total_seconds(), 2)
-            )
+        )
         msg_bodies.append(body)
 
     text = "[{}] {}\n".format(curr_time, title) \
@@ -179,11 +179,19 @@ def notify_slack(post_keys, title):
 
 
 def search_reddit(subreddit, search_string):
-    # query newest posts
+    # query newest posts from a search result
     headers = {'User-Agent': user_agent}
     # small search result limit to reduce randomness of queries that return a large amount of results
     params = {'q': search_string, 'limit': str(search_result_limit), 'sort': 'new', 't': 'week', 'restrict_sr': 'true'}
     res = requests.get("https://reddit.com/r/{}/search.json".format(subreddit), params=params, headers=headers)
+    assert res.status_code == 200, "{} received from reddit".format(res.status_code)
+    return res
+
+
+def retrieve_all(subreddit):
+    # query all newest posts in a subreddit
+    headers = {'User-Agent': user_agent}
+    res = requests.get("https://reddit.com/r/{}/new.json".format(subreddit), headers=headers)
     assert res.status_code == 200, "{} received from reddit".format(res.status_code)
     return res
 
