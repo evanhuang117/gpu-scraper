@@ -5,6 +5,8 @@ import sys
 from datetime import timedelta, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+import pytz
 import regex as re
 from slack_sdk.webhook import WebhookClient
 import requests
@@ -38,7 +40,7 @@ coarse_regex = [
 # used for automated replies to posts
 fine_regex = [
     # match permutations of 1060 6gb in the title only
-    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(1(?:0[78]|66)0)(?!\s?p)|(1060)[\s-]*(6gb?)(?=.*\[W\])",
+    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?((1(?:0[78]|66)0)(?!\s?p)|(1060)[\s-]*(6gb?))(?=.*\[W\])",
     # r"(?<=\[H\]).*(1(?:0[67]|66)0)(?=.*\[W\])",  # match nvidia series in title with "have"
     # match permutations of 8gb AMD cards we want in the title only
     r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(RX\s?[45][78]0)(?:[\s-]*)(8gb?)(?=.*\[W\])",
@@ -55,7 +57,8 @@ post_update_interval_seconds = 5
 search_result_limit = 30
 
 job_loop = Timeloop()
-# take care of (possible) edge case when result is at front of queue
+# double the size of the map because sometimes posts are removed from reddit, leading to
+# old posts being reincluded in the search query
 most_recent_posts = SlidingWindowMap(2 * search_result_limit)
 
 
@@ -93,7 +96,7 @@ def update_search():
 
 
 def find_newest():
-    curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+    curr_time = datetime.now().strftime("%D %H:%M:%S")
     print("[{}] Rerunning search...".format(curr_time))
     new_keys = set()
 
@@ -110,7 +113,7 @@ def find_newest():
                 new_keys.add(title)
         print("\t\t{}/{} are new posts".format(len(new_keys), len(updated_posts)))
 
-    except: # catch all exceptions because we never want this to fail
+    except AssertionError: # catch all exceptions because we want to keep running even if theres a failure
         e = sys.exc_info()[0]
         print("Error searching reddit: {}".format(e))
     return new_keys
@@ -143,11 +146,20 @@ def notify_slack(post_keys, title):
     webhook = WebhookClient(slack_url)
     curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
     # make a list of the new posts in markdown
+    msg_bodies = []
+    for k in post_keys:
+        post_data = most_recent_posts.get(k)
+        delta = datetime.now(tz=pytz.utc) - post_data['created_utc']
+        body = "*<{}|{}>*\nNotified in {} seconds".format(
+            post_data['url'],
+            post_data['title'],
+            round(delta.total_seconds(), 2)
+            )
+        msg_bodies.append(body)
+
     text = "[{}] {}\n".format(curr_time, title) \
-           + "\n\n".join(["*<{}|{}>*"
-                         .format(most_recent_posts.get(k)['url'],
-                                 most_recent_posts.get(k)['title'])
-                          for k in post_keys])
+           + "\n\n".join(msg_bodies)
+
     blocks = [{
         "type": "section",
         "text": {
@@ -186,7 +198,8 @@ def parse_search(search_response):
             'title': post['data']['title'],
             'body': post['data']['selftext'],
             'flair': post['data']['link_flair_text'],
-            'url': post['data']['url']
+            'url': post['data']['url'],
+            'created_utc': datetime.fromtimestamp(post['data']['created_utc'], tz=pytz.utc)
         }
         posts.append(data)
 

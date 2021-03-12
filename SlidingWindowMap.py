@@ -16,7 +16,7 @@ class SlidingWindowMap(object):
 
     def put(self, key, value):
         if key not in self.map:
-            # remove the first element if the queue reaches max size
+            # remove the oldest element if the queue reaches max size
             if self.q.qsize() == self.length:
                 del self.map[self.q.get()]
             self.q.put(key)
