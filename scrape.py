@@ -1,7 +1,6 @@
 import os
 import smtplib
 import ssl
-import sys
 from datetime import timedelta, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -10,52 +9,12 @@ import pytz
 import regex as re
 from slack_sdk.webhook import WebhookClient
 import requests
-from dotenv import load_dotenv
 from timeloop import Timeloop
 from SlidingWindowMap import SlidingWindowMap
+from logger import logger
+from config import *
 
-# load secrets from .env file
-load_dotenv()
-
-sender_email = os.getenv("EMAIL_ADDRESS")
-sender_password = os.getenv("EMAIL_PASSWORD")
-receiver_email = os.getenv("RECEIVE_EMAIL")
-user_agent = os.getenv("USER_AGENT")
-slack_url = os.getenv("SLACK_WEB_HOOK_URL")
-print("Sending from: " + sender_email)
-print("Receiving at: " + receiver_email)
-print("UserAgent: " + user_agent)
-
-# used for notifications (manual handling)
-coarse_regex = [
-    #   r"(?<!\$)(1[0-5][0-9]{2})(?!p|0)(?:[\s-]*?(watt|w)|[\s\S]*?(power supply|psu)+)",  # match posts with 1000w+ psus
-    r"(?<!\$)(1(?:0[678]|66)0)(?=[\s\S]*?(?:gpu|graphic))",
-    # match posts with nvidia series followed by "gpu"/"graphic"
-    r"GTX\s*(1(?:0[678]|66)0)",
-    # match posts with amd series that arent prices and gpus
-    r"(RX\s?[45][78]0)|(?<!\$)([45][78]0)(?!\d+|[\s-]*(usd|dollar))(?=[\s\S]*?(?:gpu|graphic))",
-    # posts about r9 390 gpus
-    r"R9[\s-]*390(?=[\s\S]*?(?:gpu|graphic))"
-]
-# used for automated replies to posts
-fine_regex = [
-    # match permutations of 1060 6gb in the title only
-    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?((1(?:0[78]|66)0)(?!\s?p)|(1060)[\s-]*(6gb?))(?=.*\[W\])",
-    # r"(?<=\[H\]).*(1(?:0[67]|66)0)(?=.*\[W\])",  # match nvidia series in title with "have"
-    # match permutations of 8gb AMD cards we want in the title only
-    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(RX\s?[45][78]0)(?:[\s-]*)(8gb?)(?=.*\[W\])",
-    # r"(?<=\[H\]).*([45][78]0)(?=.*\[W\])"
-    # match r9 390s in the title
-    r"\[H\](?!.*(full pc|pre[\s-]*built|build)).*?(R9[\s-]*390)(?=.*\[W\])"
-]
-title_regex = [
-    r"\[USA.*?\].*\[H\].*?\[W\].*(pay[\s-]*pal|\bPP)"  # filter out only posts that want paypal (selling)
-]
-search_string = ""
-subreddit = "hardwareswap"
-post_update_interval_seconds = 5
-search_result_limit = 30
-
+webhook = WebhookClient(slack_url)
 job_loop = Timeloop()
 # double the size of the map because sometimes posts are removed from reddit, leading to
 # old posts being reincluded in the search query
@@ -70,9 +29,11 @@ def main():
     global coarse_regex
     global fine_regex
     global title_regex
+    global price_regex
     coarse_regex = compile_re(coarse_regex)
     fine_regex = compile_re(fine_regex)
     title_regex = compile_re(title_regex)
+    price_regex = compile_re(price_regex)
 
     # pre populate new posts queuemap to notify only for stuff posted after the program is started
     find_newest()
@@ -91,13 +52,13 @@ def update_search():
     if coarse_keys or fine_keys:
         notify(coarse_keys, "COARSE - {}".format(get_title(coarse_keys)))
         notify(fine_keys, "FINE - {}".format(get_title(fine_keys)))
-    print("\t\t{}/{} coarse matches".format(len(coarse_keys), len(new_post_keys)))
-    print("\t\t{}/{} fine matches".format(len(fine_keys), len(new_post_keys)))
+    print(f"\t\t{len(coarse_keys)}/{len(new_post_keys)} coarse matches")
+    print(f"\t\t{len(fine_keys)}/{len(new_post_keys)} fine matches")
 
 
 def find_newest():
     curr_time = datetime.now().strftime("%D %H:%M:%S")
-    print("[{}] Rerunning search...".format(curr_time))
+    print(f"[{curr_time}] Rerunning search...")
     new_keys = set()
 
     try:
@@ -113,9 +74,8 @@ def find_newest():
                 new_keys.add(title)
         print("\t\t{}/{} are new posts".format(len(new_keys), len(updated_posts)))
 
-    except AssertionError:  # catch all exceptions because we want to keep running even if theres a failure
-        e = sys.exc_info()[0]
-        print("Error searching reddit: {}".format(e))
+    except AssertionError as e:  # catch all exceptions because we want to keep running even if theres a failure
+        logger.error(msg=f"Error searching reddit: {e}")
     return new_keys
 
 
@@ -126,12 +86,12 @@ def notify(post_keys, title):
         # send the notification
         try:
             notify_slack(post_keys, title)
-            print("\tSlack message sent to: {}".format(slack_url))
+            print(f"\tSlack message sent to: {slack_url}")
 
             # send_email(email_message)
             # print("Email sent to: {} from: {}".format(receiver_email, sender_email))
         except AssertionError as e:
-            print("Error sending notification: {}".format(e))
+            logger.error(msg=f"Error sending notification: {e}")
 
     """
     # refresh the auth token before it expires
@@ -143,21 +103,25 @@ def notify(post_keys, title):
 
 
 def notify_slack(post_keys, title):
-    webhook = WebhookClient(slack_url)
     curr_time = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
     # make a list of the new posts in markdown
     msg_bodies = []
     for k in post_keys:
         post_data = most_recent_posts.get(k)
         delta = datetime.now(tz=pytz.utc) - post_data['created_utc']
-        body = "*<{}|{}>*\nNotified in {} seconds".format(
+        body = "*<{}|{}>*\nNotified in {} seconds\n\n".format(
             post_data['url'],
             post_data['title'],
-            round(delta.total_seconds(), 2)
+            round(delta.total_seconds(), 2),
         )
-        msg_bodies.append(body)
 
-    text = "[{}] {}\n".format(curr_time, title) \
+        # add the prices we found
+        prices = "".join([f"Price: {match.group('gpu')} {match.group('price')}\n"
+                          for match in re.finditer(price_regex, post_data['body'])])
+
+        msg_bodies.append(body + prices)
+
+    text = f"[{curr_time}] {title}\n" \
            + "\n\n".join(msg_bodies)
 
     blocks = [{
@@ -174,8 +138,8 @@ def notify_slack(post_keys, title):
         blocks=blocks
     )
 
-    assert response.status_code == 200, "{} received from Slack".format(response.status_code)
-    assert response.body == "ok", "{} received from Slack".format(response.body)
+    assert response.status_code == 200, f"{response.status_code} received from Slack"
+    assert response.body == "ok", f"{response.body} received from Slack"
 
 
 def search_reddit(subreddit, search_string):
@@ -183,16 +147,19 @@ def search_reddit(subreddit, search_string):
     headers = {'User-Agent': user_agent}
     # small search result limit to reduce randomness of queries that return a large amount of results
     params = {'q': search_string, 'limit': str(search_result_limit), 'sort': 'new', 't': 'week', 'restrict_sr': 'true'}
-    res = requests.get("https://reddit.com/r/{}/search.json".format(subreddit), params=params, headers=headers)
-    assert res.status_code == 200, "{} received from reddit".format(res.status_code)
+    try:
+        res = requests.get(f"https://reddit.com/r/{subreddit}/search.json", params=params, headers=headers)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error searching reddit: {e}")
+    assert res.status_code == 200, f"{res.status_code} received from reddit"
     return res
 
 
 def retrieve_all(subreddit):
     # query all newest posts in a subreddit
     headers = {'User-Agent': user_agent}
-    res = requests.get("https://reddit.com/r/{}/new.json".format(subreddit), headers=headers)
-    assert res.status_code == 200, "{} received from reddit".format(res.status_code)
+    res = requests.get(f"https://reddit.com/r/{subreddit}/new.json", headers=headers)
+    assert res.status_code == 200, f"{res.status_code} received from reddit"
     return res
 
 
